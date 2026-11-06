@@ -103,7 +103,7 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
   };
 
   return (
-    <div className={`flex min-h-dvh items-start justify-center overflow-y-auto bg-slate-900 bg-cover bg-center sm:items-center ${
+    <div className={`flex min-h-dvh items-start justify-center overflow-y-auto overscroll-y-none bg-slate-900 bg-cover bg-center sm:items-center ${
       mode === 'signup' ? 'p-2 sm:p-6' : 'p-3 sm:p-6'
     }`} style={{ backgroundImage: `url('https://i.pinimg.com/1200x/af/b6/05/afb605d20bae30bb5f1886ee8464078e.jpg')` }}>
         <div className={`my-auto w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900/85 text-center shadow-2xl backdrop-blur-md ${

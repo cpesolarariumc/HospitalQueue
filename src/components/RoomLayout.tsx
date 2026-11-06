@@ -110,7 +110,7 @@ export default function RoomLayout({
         </aside>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-10 flex items-center space-x-3 border-b border-slate-200 bg-white p-3 shadow-sm sm:p-4">
           <button
             type="button"
@@ -123,7 +123,7 @@ export default function RoomLayout({
           </button>
           <h1 className="text-lg font-bold capitalize text-slate-800">Room Workspace</h1>
         </header>
-        <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">{children}</main>
         <SiteFooter />
       </div>
     </div>
