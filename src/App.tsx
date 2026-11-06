@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Stethoscope, CheckCircle2, AlertTriangle, Trash2, Check, CircleDot, Calendar, Clock, Zap, Calendar as CalendarIcon, ChevronLeft, ChevronRight, DoorOpen, Eye, EyeOff } from 'lucide-react';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot, getDocs, getDoc, doc } from 'firebase/firestore';
@@ -77,6 +77,27 @@ function calculateAgeFromBirthday(birthday: string) {
     age -= 1;
   }
   return String(age);
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+interface RegisteredDoctor {
+  id: string;
+  fullName?: string;
+  email?: string;
+  specialty?: string;
+  specialization?: string;
+}
+
+interface QueueAppointment extends AppointmentRequest {
+  fullName: string;
+  isEmergency: boolean;
+  priorityWeight?: number;
+  traumaType?: string;
+  traumaLevel?: 1 | 2 | 3;
+  traumaSpecification?: string;
 }
 
 const doctorSpecialtyGroups = [
@@ -200,7 +221,7 @@ export default function App() {
   const [staffAuthenticated, setStaffAuthenticated] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [doctorSelectedDate, setDoctorSelectedDate] = useState(() => new Date());
-  const [registeredDoctors, setRegisteredDoctors] = useState<any[]>([]);
+  const [registeredDoctors, setRegisteredDoctors] = useState<RegisteredDoctor[]>([]);
   const [selectedDoctors, setSelectedDoctors] = useState<{ [apptId: string]: string }>({});
   const [queueSubTab, setQueueSubTab] = useState<'today' | 'upcoming'>('today');
 
@@ -208,10 +229,16 @@ export default function App() {
     if (currentUser?.role !== 'admin') return;
     const q = query(collection(db, 'doctors'), where('role', '==', 'doctor'));
     return onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      }));
+      const list = snapshot.docs.map((docSnap): RegisteredDoctor => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          fullName: typeof data.fullName === 'string' ? data.fullName : undefined,
+          email: typeof data.email === 'string' ? data.email : undefined,
+          specialty: typeof data.specialty === 'string' ? data.specialty : undefined,
+          specialization: typeof data.specialization === 'string' ? data.specialization : undefined,
+        };
+      });
       setRegisteredDoctors(list);
     });
   }, [currentUser?.role]);
@@ -288,9 +315,12 @@ export default function App() {
   const [liveQueue, setLiveQueue] = useState<QueuePatient[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRequest[]>([]);
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
-  const [queuePositions, setQueuePositions] = useState<QueuePosition[]>([]);
-  const [queuePositionsLoading, setQueuePositionsLoading] = useState(true);
-  const [queuePositionsError, setQueuePositionsError] = useState<string | null>(null);
+  const [patientQueueState, setPatientQueueState] = useState<{
+    uid: string;
+    positions: QueuePosition[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
   const [queueDataLoadedFor, setQueueDataLoadedFor] = useState<string | null>(null);
   const [appointmentsLoadedFor, setAppointmentsLoadedFor] = useState<string | null>(null);
 
@@ -298,15 +328,6 @@ export default function App() {
     if (!currentUser?.uid) return;
 
     const uid = currentUser.uid;
-    if (currentUser.role === 'patient') {
-      setQueuePositions([]);
-      setQueuePositionsLoading(true);
-      setQueuePositionsError(null);
-    } else {
-      setQueuePositions([]);
-      setQueuePositionsLoading(false);
-      setQueuePositionsError(null);
-    }
     const patientEmail = currentUser.role === 'patient'
       ? currentUser.email
       : undefined;
@@ -329,13 +350,10 @@ export default function App() {
     const unsubQueuePositions = currentUser.role === 'patient'
       ? subscribeToQueuePositions(
         (positions) => {
-          setQueuePositions(positions);
-          setQueuePositionsLoading(false);
-          setQueuePositionsError(null);
+          setPatientQueueState({ uid, positions, loading: false, error: null });
         },
         (error) => {
-          setQueuePositionsLoading(false);
-          setQueuePositionsError(error.message);
+          setPatientQueueState({ uid, positions: [], loading: false, error: error.message });
         },
       )
       : undefined;
@@ -344,7 +362,14 @@ export default function App() {
       unsubAppts();
       unsubQueuePositions?.();
     };
-  }, [currentUser?.role, currentUser?.uid, currentUser?.accountNo]);
+  }, [currentUser?.role, currentUser?.uid, currentUser?.accountNo, currentUser?.email]);
+  const currentPatientQueueState = currentUser?.role === 'patient' &&
+    patientQueueState?.uid === currentUser.uid
+    ? patientQueueState
+    : null;
+  const queuePositions = currentPatientQueueState?.positions || [];
+  const queuePositionsLoading = currentPatientQueueState?.loading ?? currentUser?.role === 'patient';
+  const queuePositionsError = currentPatientQueueState?.error || null;
   useEffect(() => {
     if (!currentUser?.uid) return;
 
@@ -386,45 +411,47 @@ export default function App() {
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  const todaysQueue = appointments
-    .filter((appt: any) => {
+  const todaysQueue = useMemo(() => appointments
+    .filter((appt) => {
       const status = appt.status?.toLowerCase();
       const service = appt.serviceType?.toLowerCase() || '';
       const isConfirmed = status === 'confirmed' || status === 'approved';
-      const isEmergency = appt.isEmergency || service.includes('emergency');
+      const isEmergency = service.includes('emergency');
       
       const apptDate = appt.date || '';
       return apptDate === todayStr && (isConfirmed || (isEmergency && status !== 'cancelled'));
     })
-    .map((appt: any) => ({
+    .map((appt): QueueAppointment => ({
       ...appt,
-      fullName: appt.patientName || appt.fullName || appt.name || 'Patient',
+      fullName: appt.patientName || 'Patient',
       accountNo: appt.accountNo || appt.id?.slice(0, 6) || 'N/A',
-      isEmergency: appt.isEmergency || appt.serviceType?.toLowerCase().includes('emergency') || false,
-    }));
+      isEmergency: appt.serviceType?.toLowerCase().includes('emergency') || false,
+    })), [appointments, todayStr]);
 
-  const activeQueue: QueuePatient[] = [...liveQueue];
-  const queuedAccountNumbers = new Set(
-    activeQueue.map((patient) => patient.accountNo.trim().toUpperCase())
-  );
-  todaysQueue.forEach((appointment: any) => {
-    const accountNo = String(appointment.accountNo || '').trim();
-    const normalizedAccountNo = accountNo.toUpperCase();
-    if (!accountNo || queuedAccountNumbers.has(normalizedAccountNo)) return;
+  const activeQueue = useMemo(() => {
+    const queue: QueuePatient[] = [...liveQueue];
+    const queuedAccountNumbers = new Set(
+      queue.map((patient) => patient.accountNo.trim().toUpperCase())
+    );
+    todaysQueue.forEach((appointment) => {
+      const accountNo = appointment.accountNo.trim();
+      const normalizedAccountNo = accountNo.toUpperCase();
+      if (!accountNo || queuedAccountNumbers.has(normalizedAccountNo)) return;
 
-    activeQueue.push({
-      accountNo,
-      fullName: appointment.fullName,
-      priorityWeight: Number(appointment.priorityWeight) || 0,
-      isEmergency: Boolean(appointment.isEmergency),
-      traumaType: appointment.traumaType,
-      traumaLevel: appointment.traumaLevel,
-      traumaSpecification: appointment.traumaSpecification,
-      room: appointment.room,
+      queue.push({
+        accountNo,
+        fullName: appointment.fullName,
+        priorityWeight: Number(appointment.priorityWeight) || 0,
+        isEmergency: appointment.isEmergency,
+        traumaType: appointment.traumaType,
+        traumaLevel: appointment.traumaLevel,
+        traumaSpecification: appointment.traumaSpecification,
+        room: appointment.room,
+      });
+      queuedAccountNumbers.add(normalizedAccountNo);
     });
-    queuedAccountNumbers.add(normalizedAccountNo);
-  });
-  activeQueue.sort((a, b) => b.priorityWeight - a.priorityWeight);
+    return queue.sort((a, b) => b.priorityWeight - a.priorityWeight);
+  }, [liveQueue, todaysQueue]);
 
   useEffect(() => {
     if (
@@ -442,20 +469,19 @@ export default function App() {
     currentUser?.uid,
     queueDataLoadedFor,
     appointmentsLoadedFor,
-    liveQueue,
-    appointments,
+    activeQueue,
   ]);
 
   const upcomingAppointments = appointments
-    .filter((appt: any) => {
+    .filter((appt) => {
       const status = appt.status?.toLowerCase();
       const isConfirmed = status === 'confirmed' || status === 'approved';
       const apptDate = appt.date || '';
       return isConfirmed && apptDate > todayStr;
     })
-    .map((appt: any) => ({
+    .map((appt) => ({
       ...appt,
-      fullName: appt.patientName || appt.fullName || appt.name || 'Patient',
+      fullName: appt.patientName || 'Patient',
       accountNo: appt.accountNo || appt.id?.slice(0, 6) || 'N/A',
     }));
 
@@ -672,8 +698,8 @@ export default function App() {
                 alert(`Access Denied: Add an admin profile with role "admin" at /admins/${userCredential.user.uid} to match the current Firestore security rules.`);
                 await signOut(auth);
               }
-            } catch (err: any) {
-              alert("Invalid Admin Credentials: " + (err?.message || err));
+            } catch (err: unknown) {
+              alert("Invalid Admin Credentials: " + getErrorMessage(err));
             }
           }} className="space-y-4">
             <input type="email" required placeholder="Admin Email Address" value={adminInput} onChange={(e) => setAdminInput(e.target.value)} className="w-full rounded-2xl border border-white/20 bg-white/10 p-3.5 text-sm text-white placeholder-slate-300 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/70" />
@@ -801,8 +827,8 @@ export default function App() {
                 alert('Access Denied: This account is not registered as a doctor.');
                 await signOut(auth);
               }
-            } catch (err: any) {
-              alert('Invalid Doctor Credentials: ' + (err?.message || err));
+            } catch (err: unknown) {
+              alert('Invalid Doctor Credentials: ' + getErrorMessage(err));
             }
           }} className="space-y-4">
             <input type="email" required placeholder="Doctor Email Address" value={doctorInput} onChange={(e) => setDoctorInput(e.target.value)} className="w-full rounded-2xl border border-white/20 bg-white/10 p-3.5 text-sm text-white placeholder-slate-300 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/70" />
@@ -866,8 +892,8 @@ export default function App() {
               uid: patientRecord.uid,
               accountNo: patientRecord.accountNo,
             });
-          } catch (err: any) {
-            alert("Patient Login Error: " + (err?.message || err));
+          } catch (err: unknown) {
+            alert("Patient Login Error: " + getErrorMessage(err));
           } finally {
             setIsLoggingIn(false);
           }
@@ -977,8 +1003,8 @@ export default function App() {
                               try {
                                 await removeFromQueue(p.accountNo);
                                 alert(`${p.fullName} removed from the queue!`);
-                              } catch (err: any) {
-                                alert("Error removing from queue: " + (err?.message || err));
+                              } catch (err: unknown) {
+                                alert("Error removing from queue: " + getErrorMessage(err));
                               }
                             }
                           }}
@@ -1306,8 +1332,8 @@ export default function App() {
                               await updateAppointmentStatus(appt.id, 'cancelled');
                               alert("Appointment cancelled successfully!");
                             }
-                          } catch (err: any) {
-                            alert("Error deleting appointment: " + (err?.message || err));
+                          } catch (err: unknown) {
+                            alert("Error deleting appointment: " + getErrorMessage(err));
                           }
                         }
                       }}
@@ -1341,8 +1367,8 @@ export default function App() {
                 setDocSpecialtySearch('');
                 setDocPassword('');
                 setShowDoctorPassword(false);
-              } catch (error: any) {
-                alert('Error creating doctor account: ' + (error?.message || error));
+              } catch (error: unknown) {
+                alert('Error creating doctor account: ' + getErrorMessage(error));
               }
             }} className="space-y-4">
               <div>
@@ -1637,8 +1663,8 @@ export default function App() {
                           try {
                             await removeFromQueue(p.accountNo);
                             alert(`Consultation completed for ${p.fullName}.`);
-                          } catch (err: any) {
-                            alert("Error finishing consultation: " + (err?.message || err));
+                          } catch (err: unknown) {
+                            alert("Error finishing consultation: " + getErrorMessage(err));
                           }
                         }
                       }}
@@ -1926,7 +1952,7 @@ export default function App() {
                   <p className="break-words text-xl font-extrabold text-emerald-700 sm:text-2xl">
                     {currentUser.role === 'patient'
                       ? patientQueueDisplay[0]?.accountNo || 'None Active'
-                      : (todaysQueue[0] as any)?.accountNo || 'None Active'}
+                      : todaysQueue[0]?.accountNo || 'None Active'}
                   </p>
                   <p className="text-xs text-slate-400 italic">
                     {currentUser.role === 'patient'
@@ -1952,7 +1978,7 @@ export default function App() {
                 <span>Upcoming Approved Appointments</span>
               </h3>
               <p className="text-xs text-slate-400 mb-4">
-                Appointments scheduled for future dates (e.g., October 24 onwards)
+                Appointments scheduled for future dates
               </p>
               <hr className="mb-4" />
 
@@ -1961,7 +1987,7 @@ export default function App() {
               ) : (
                 <div className="space-y-3">
                   {upcomingAppointments.map((item) => {
-                    const p = item as any;
+                    const p = item;
                     return (
                       <div
                         key={p.id}
@@ -1979,7 +2005,7 @@ export default function App() {
                             </span>
                             <span className="flex items-center space-x-1">
                               <Clock className="w-3.5 h-3.5 text-slate-500" />
-                              <span className="font-semibold text-slate-700">{p.timeSlot || p.time}</span>
+                              <span className="font-semibold text-slate-700">{p.timeSlot}</span>
                             </span>
                           </div>
                           {p.serviceType && (

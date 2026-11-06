@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { LayoutDashboard, Activity, FileText, Calendar, LogOut, Stethoscope, Menu } from 'lucide-react';
-import SiteFooter from './SiteFooter';
 
 interface DoctorLayoutProps {
   activeTab: 'queue' | 'progress' | 'records' | 'appointment';
@@ -118,7 +117,6 @@ export default function DoctorLayout({ activeTab, setActiveTab, doctorName = "Dr
           <h1 className="text-lg font-bold text-slate-800 capitalize">Doctor Workspace</h1>
         </header>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">{children}</main>
-        <SiteFooter />
       </div>
     </div>
   );

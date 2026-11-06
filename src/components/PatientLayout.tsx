@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import logo from '../assets/logo.png';
-import SiteFooter from './SiteFooter';
 import { 
   Clock, 
   Calendar, 
@@ -165,7 +164,6 @@ export default function PatientLayout({
           </div>
         </header>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">{children}</main>
-        <SiteFooter />
       </div>
     </div>
   );
