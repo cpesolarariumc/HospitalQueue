@@ -2055,7 +2055,7 @@ export default function App() {
       </PatientLayout>
       {/* Interactive Single-Attempt Profile Modal */}
       {showProfileModal && (
-        <div className="fixed inset-x-0 top-14 bottom-0 z-10 overflow-y-auto bg-[#e2e8e6] md:inset-y-0 md:left-64">
+        <div className="fixed inset-x-0 top-14 bottom-0 z-40 overflow-y-auto overscroll-y-contain bg-[#e2e8e6] md:inset-y-0 md:left-64">
           <div className="mx-auto min-h-full w-full max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
             <section id="personal-profile" className="space-y-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
               <h4 className="text-lg font-bold text-slate-800">Personal profile</h4>
