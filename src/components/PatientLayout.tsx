@@ -63,10 +63,10 @@ export default function PatientLayout({
           type="button"
           aria-label="Close sidebar"
           onClick={() => setIsSidebarOpen(false)}
-          className="fixed inset-0 z-20 bg-slate-900/40 md:hidden"
+          className="fixed inset-0 z-50 bg-slate-900/40 md:hidden"
         />
       )}
-      <div className={`fixed inset-y-0 left-0 z-30 w-64 transition-transform duration-300 md:static md:z-auto md:shrink-0 md:overflow-hidden md:transition-[width] md:transform-none ${
+      <div className={`fixed inset-y-0 left-0 z-[60] w-64 transition-transform duration-300 md:static md:z-auto md:shrink-0 md:overflow-hidden md:transition-[width] md:transform-none ${
         isSidebarOpen ? 'translate-x-0 md:w-64' : '-translate-x-full md:w-0'
       }`}>
         <aside className="w-64 h-full bg-white border-r border-slate-200 flex flex-col justify-between shadow-sm">
