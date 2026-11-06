@@ -164,7 +164,7 @@ export default function PatientLayout({
             </h1>
           </div>
         </header>
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 pb-20 sm:p-4 sm:pb-20 md:p-6 md:pb-6">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">{children}</main>
         <SiteFooter />
       </div>
     </div>
