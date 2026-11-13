@@ -2,12 +2,12 @@ import type { QueuePatient } from '../services/patientService';
 
 interface AdminDashboardProps {
   queue: QueuePatient[];
+  cancelledCount: number;
 }
 
-export default function AdminDashboard({ queue }: AdminDashboardProps) {
+export default function AdminDashboard({ queue, cancelledCount }: AdminDashboardProps) {
   const emergencyCount = queue.filter(p => p.isEmergency).length;
   const appointCount = queue.length;
-  const canceledCount = 0; // Track from state if needed
 
   return (
     <div className="space-y-6">
@@ -23,7 +23,7 @@ export default function AdminDashboard({ queue }: AdminDashboardProps) {
         </div>
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
           <p className="text-xs font-bold text-slate-500 uppercase">Canceled</p>
-          <p className="text-2xl font-extrabold text-slate-800 mt-1">{canceledCount}</p>
+          <p className="text-2xl font-extrabold text-slate-800 mt-1">{cancelledCount}</p>
         </div>
       </div>
 

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 interface AdminLayoutProps {
-  activeTab: 'queue' | 'addQueue' | 'addAppoint' | 'addDoctor' | 'addRoom' | 'progress' | 'records' | 'emergencyProcedures';
+  activeTab: 'queue' | 'addQueue' | 'addAppoint' | 'addDoctor' | 'addRoom' | 'progress' | 'records' | 'emergencyProcedures' | 'emergencyProfiles';
   setActiveTab: (tab: AdminLayoutProps['activeTab']) => void;
   adminName?: string;
   onLogout: () => void;
@@ -49,6 +49,7 @@ export default function AdminLayout({
     { id: 'addDoctor', label: 'Add Doctor Account', icon: Stethoscope },
     { id: 'addRoom', label: 'Add Room Account', icon: DoorOpen },
     { id: 'emergencyProcedures', label: 'Emergency Procedures', icon: ClipboardCheck },
+    { id: 'emergencyProfiles', label: 'Emergency Profiles', icon: Heart },
     { id: 'progress', label: 'Progress Updates', icon: Activity },
     { id: 'records', label: 'Patient Records', icon: FileText },
   ] as const;

@@ -15,9 +15,11 @@ import {
   updateAppointmentStatus,
   type AppointmentRequest 
 } from '../services/appointmentService';
+import { useUiFeedback } from './uiFeedbackContext';
 
 interface AppointmentViewProps {
   currentUser: { name: string; accountNo?: string; uid: string };
+  onNotify: (kind: 'success' | 'error' | 'info', message: string) => void;
 }
 
 function toDateKey(date: Date) {
@@ -55,7 +57,8 @@ function normalizeTimeSlot(timeSlot: string) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-export default function AppointmentView({ currentUser }: AppointmentViewProps) {
+export default function AppointmentView({ currentUser, onNotify }: AppointmentViewProps) {
+  const { confirm: confirmInUi } = useUiFeedback();
   const [viewMode, setViewMode] = useState<'month' | 'day' | 'week'>('month');
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [showModal, setShowModal] = useState(false);
@@ -95,16 +98,18 @@ export default function AppointmentView({ currentUser }: AppointmentViewProps) {
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (slotAvailability.date !== selectedDateKey || slotAvailability.error) {
-      alert(slotAvailability.error
-        ? `Could not verify appointment availability: ${slotAvailability.error}`
-        : 'Still checking availability. Please try again in a moment.');
+      if (slotAvailability.error) {
+        alert(`Could not verify appointment availability: ${slotAvailability.error}`);
+      } else {
+        onNotify('info', 'Still checking availability. Please try again in a moment.');
+      }
       return;
     }
     const bookingTimeSlot = availableTimeSlots.includes(timeSlot)
       ? timeSlot
       : availableTimeSlots[0] || '';
     if (!bookingTimeSlot) {
-      alert('There are no available appointment times on this date. Please choose another date.');
+      onNotify('info', 'There are no available appointment times on this date. Please choose another date.');
       return;
     }
 
@@ -114,7 +119,7 @@ export default function AppointmentView({ currentUser }: AppointmentViewProps) {
       normalizeTimeSlot(appointment.timeSlot) === normalizeTimeSlot(bookingTimeSlot)
     ) || slotAvailability.slots.includes(normalizeTimeSlot(bookingTimeSlot));
     if (slotIsTaken) {
-      alert('That time has just been booked. Please choose another available time.');
+      onNotify('error', 'That time has just been booked. Please choose another available time.');
       return;
     }
 
@@ -127,21 +132,28 @@ export default function AppointmentView({ currentUser }: AppointmentViewProps) {
         timeSlot: bookingTimeSlot,
         serviceType,
       });
-      alert('Appointment request submitted! Pending admin approval.');
+      onNotify('success', 'Appointment request submitted! Pending admin approval.');
       setShowModal(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      alert('Error booking appointment: ' + message);
+      onNotify('error', `Error booking appointment: ${message}`);
     }
   };
 
   const handleCancelAppointment = async (id: string) => {
-    if (confirm('Are you sure you want to cancel this appointment request?')) {
+    const accepted = await confirmInUi({
+      title: 'Cancel appointment request?',
+      message: 'Are you sure you want to cancel this appointment request?',
+      confirmLabel: 'Cancel appointment',
+      destructive: true,
+    });
+    if (accepted) {
       try {
         await updateAppointmentStatus(id, 'cancelled');
+        onNotify('success', 'Appointment cancelled successfully.');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        alert('Error cancelling appointment: ' + message);
+        onNotify('error', `Error cancelling appointment: ${message}`);
       }
     }
   };

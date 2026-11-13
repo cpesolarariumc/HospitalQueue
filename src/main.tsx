@@ -1,10 +1,13 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import UiFeedbackProvider from './components/UiFeedbackProvider'
 import './index.css' // <-- THIS LINE MUST BE HERE
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <UiFeedbackProvider>
+      <App />
+    </UiFeedbackProvider>
   </React.StrictMode>,
 )

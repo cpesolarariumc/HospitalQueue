@@ -27,6 +27,7 @@ export interface QueuePatient {
   room?: string;
   patientId?: string;
   emergencyTypeId?: string;
+  appointmentId?: string;
   createdAt?: Timestamp | null;
 }
 
@@ -34,7 +35,15 @@ export interface QueuePosition {
   id: string;
   accountNo: string;
   priorityWeight: number;
+  appointmentId?: string;
+  estimatedWaitMinutes?: number;
+  waitEstimateVersion?: number;
 }
+
+export const STANDARD_WAIT_MINUTES = 5;
+export const EMERGENCY_WAIT_MINUTES = 10;
+export const EMERGENCY_PRIORITY_WEIGHT = 9_999_999_999_999;
+export const QUEUE_WAIT_ESTIMATE_VERSION = 3;
 
 export interface EmergencyRouting {
   id: string;
@@ -135,6 +144,15 @@ export function subscribeToQueuePositions(
           id: positionDoc.id,
           accountNo: typeof data.accountNo === 'string' ? data.accountNo : positionDoc.id,
           priorityWeight: typeof data.priorityWeight === 'number' ? data.priorityWeight : 0,
+          ...(typeof data.appointmentId === 'string' ? { appointmentId: data.appointmentId } : {}),
+          ...(typeof data.estimatedWaitMinutes === 'number' &&
+          Number.isFinite(data.estimatedWaitMinutes) &&
+          data.estimatedWaitMinutes >= 0
+            ? { estimatedWaitMinutes: data.estimatedWaitMinutes }
+            : {}),
+          ...(typeof data.waitEstimateVersion === 'number'
+            ? { waitEstimateVersion: data.waitEstimateVersion }
+            : {}),
         };
       }));
     },
@@ -144,15 +162,27 @@ export function subscribeToQueuePositions(
 
 export async function syncQueuePositions(queue: QueuePatient[]) {
   const currentPositions = await getDocs(collection(db, 'queuePositions'));
-  const desiredPositions = new Map(
-    queue.map((patient) => [
-      patient.accountNo.trim(),
-      {
-        accountNo: patient.accountNo.trim(),
-        priorityWeight: patient.priorityWeight,
-      },
-    ]),
-  );
+  const desiredPositions = new Map<string, {
+    accountNo: string;
+    priorityWeight: number;
+    appointmentId?: string;
+    estimatedWaitMinutes: number;
+    waitEstimateVersion: number;
+  }>();
+  let minutesBeforePatient = 0;
+  queue.forEach((patient) => {
+    const accountNo = patient.accountNo.trim();
+    desiredPositions.set(accountNo, {
+      accountNo,
+      priorityWeight: patient.priorityWeight,
+      ...(patient.appointmentId ? { appointmentId: patient.appointmentId } : {}),
+      estimatedWaitMinutes: minutesBeforePatient,
+      waitEstimateVersion: QUEUE_WAIT_ESTIMATE_VERSION,
+    });
+    minutesBeforePatient += patient.isEmergency
+      ? EMERGENCY_WAIT_MINUTES
+      : STANDARD_WAIT_MINUTES;
+  });
   const operations = [
     ...currentPositions.docs
       .filter((positionDoc) => !desiredPositions.has(positionDoc.id))
@@ -190,7 +220,7 @@ export async function addPatientToQueue(
   const priorityWeight = traumaLevel
     ? (4 - traumaLevel) * 10_000_000_000_000 + Date.now()
     : isEmergency
-      ? 9999999999999
+      ? EMERGENCY_PRIORITY_WEIGHT
       : Date.now();
   const queueRef = doc(db, 'queues', accountNo);
   const existingPatientQuery = query(

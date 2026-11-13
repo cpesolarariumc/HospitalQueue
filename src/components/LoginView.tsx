@@ -19,7 +19,7 @@ interface LoginViewProps {
   isLoggingIn: boolean;
   onLogin: (e: React.FormEvent, credentials?: { email: string; pass: string }) => void;
   onRegister: (newUserData: { uid: string; fullName: string; email: string; phone: string }) => Promise<void>;
-  onGoogleSuccess: (user: FirebaseUser) => void;
+  onGoogleSuccess: (user: FirebaseUser) => void | Promise<void>;
 }
 
 export default function LoginView({ isLoggingIn, onLogin, onRegister, onGoogleSuccess }: LoginViewProps) {
@@ -99,10 +99,13 @@ export default function LoginView({ isLoggingIn, onLogin, onRegister, onGoogleSu
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       if (result.user) {
-        onGoogleSuccess(result.user);
+        await onGoogleSuccess(result.user);
       }
     } catch (error: unknown) {
-      alert("Google Sign-In Error: " + (error instanceof Error ? error.message : String(error)));
+      setMessage({
+        text: `Google sign-in failed: ${error instanceof Error ? error.message : String(error)}`,
+        type: 'error',
+      });
     }
   };
 

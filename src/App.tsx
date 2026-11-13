@@ -4,6 +4,7 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot, getDocs, getDoc, doc } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
 import LoginView from './components/LoginView';
+import { useUiFeedback } from './components/uiFeedbackContext';
 import PatientLayout from './components/PatientLayout';
 import DoctorLayout from './components/DoctorLayout';
 import DoctorProgressUpdate from './components/DoctorProgressUpdate';
@@ -12,6 +13,7 @@ import PatientMedicalRecordHistory from './components/PatientMedicalRecordHistor
 import PatientPrescriptions from './components/PatientPrescriptions';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './components/AdminDashboard';
+import AdminEmergencyPatientProfiles from './components/AdminEmergencyPatientProfiles';
 import AppointmentView from './components/AppointmentView';
 import UserQueue from './pages/UserQueue';
 import ProgressUpdate from './components/ProgressUpdate';
@@ -24,6 +26,10 @@ import {
   subscribeToLiveQueue, 
   subscribeToQueuePositions,
   syncQueuePositions,
+  STANDARD_WAIT_MINUTES,
+  EMERGENCY_WAIT_MINUTES,
+  EMERGENCY_PRIORITY_WEIGHT,
+  QUEUE_WAIT_ESTIMATE_VERSION,
   addPatientToQueue, 
   removeFromQueue,
   savePatientProfile, 
@@ -39,6 +45,7 @@ import {
 import { subscribeToAppointments, updateAppointmentStatus, type AppointmentRequest } from './services/appointmentService';
 import { createDoctorAccount, ensureDoctorProfileAtAuthUid } from './services/doctorService';
 import { createRoomAccount, roomDestinations } from './services/roomService';
+import { calculateAgeFromBirthday } from './utils/dateUtils';
 import logo from './assets/logo.png';
 
 function formatLocalDateKey(date: Date) {
@@ -48,35 +55,17 @@ function formatLocalDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function calculateAgeFromBirthday(birthday: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthday.trim());
-  if (!match) return '';
-
-  const [, yearText, monthText, dayText] = match;
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const birthDate = new Date(year, month - 1, day);
-  const today = new Date();
-
-  if (
-    birthDate.getFullYear() !== year ||
-    birthDate.getMonth() !== month - 1 ||
-    birthDate.getDate() !== day ||
-    birthDate > today
-  ) {
-    return '';
-  }
-
-  let age = today.getFullYear() - year;
-  if (
-    today.getMonth() < month - 1 ||
-    (today.getMonth() === month - 1 && today.getDate() < day)
-  ) {
-    age -= 1;
-  }
-  return String(age);
+function formatEstimatedWait(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours === 0) return `${minutes} min`;
+  return `${hours} ${hours === 1 ? 'hour' : 'hours'}${
+    remainingMinutes > 0 ? ` ${remainingMinutes} min` : ''
+  }`;
 }
+
+const FAST_QUEUE_MAX_WAIT_MINUTES = 15;
+const MODERATE_QUEUE_MAX_WAIT_MINUTES = 30;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -210,6 +199,7 @@ async function ensurePatientProfileRecord(user: { uid: string; email?: string | 
 }
 
 export default function App() {
+  const { notify: showAppNotice, confirm: confirmInUi } = useUiFeedback();
   const path = window.location.pathname || '';
   const isExplicitAdminRoute = path.includes('admin') || path.includes('hw-pw-admin');
   const isExplicitDoctorRoute = path.includes('hq-pw-dr-login') || path.includes('doctor');
@@ -266,6 +256,7 @@ export default function App() {
     address: '',
   });
   const [isSavingPatientProfile, setIsSavingPatientProfile] = useState(false);
+  const [isConfirmingPatientProfileSave, setIsConfirmingPatientProfileSave] = useState(false);
 
   // Form inputs
   const [adminInput, setAdminInput] = useState('');
@@ -302,7 +293,7 @@ export default function App() {
 
   // Tabs
   const [patientTab, setPatientTab] = useState<'queue' | 'appointment' | 'progress' | 'records' | 'prescriptions'>('queue');
-  const [adminTab, setAdminTab] = useState<'queue' | 'addQueue' | 'addAppoint' | 'addDoctor' | 'addRoom' | 'progress' | 'records' | 'emergencyProcedures'>('queue');
+  const [adminTab, setAdminTab] = useState<'queue' | 'addQueue' | 'addAppoint' | 'addDoctor' | 'addRoom' | 'progress' | 'records' | 'emergencyProcedures' | 'emergencyProfiles'>('queue');
   const [doctorTab, setDoctorTab] = useState<'queue' | 'progress' | 'records' | 'appointment'>('queue');
   const [roomTab, setRoomTab] = useState<RoomTab>('progress');
   
@@ -312,6 +303,7 @@ export default function App() {
   // Real-time Queue & Appointments
   const [liveQueue, setLiveQueue] = useState<QueuePatient[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRequest[]>([]);
+  const [cancelledCount, setCancelledCount] = useState(0);
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
   const [patientQueueState, setPatientQueueState] = useState<{
     uid: string;
@@ -441,6 +433,7 @@ export default function App() {
         fullName: appointment.fullName,
         priorityWeight: Number(appointment.priorityWeight) || 0,
         isEmergency: appointment.isEmergency,
+        appointmentId: appointment.id,
         traumaType: appointment.traumaType,
         traumaLevel: appointment.traumaLevel,
         traumaSpecification: appointment.traumaSpecification,
@@ -450,6 +443,8 @@ export default function App() {
     });
     return queue.sort((a, b) => b.priorityWeight - a.priorityWeight);
   }, [liveQueue, todaysQueue]);
+
+  const queueWaitEstimateVersion = QUEUE_WAIT_ESTIMATE_VERSION;
 
   useEffect(() => {
     if (
@@ -468,6 +463,7 @@ export default function App() {
     queueDataLoadedFor,
     appointmentsLoadedFor,
     activeQueue,
+    queueWaitEstimateVersion,
   ]);
 
   const upcomingAppointments = appointments
@@ -581,13 +577,17 @@ export default function App() {
   const patientQueueIndex = (currentUser?.role === 'patient' ? queuePositions : activeQueue).findIndex(
     (patient) => patient.accountNo.trim().toUpperCase() === normalizedLoggedInAccount,
   );
+  const loggedInPatientQueueEntry = liveQueue.find(
+    (patient) => patient.accountNo.trim().toUpperCase() === normalizedLoggedInAccount,
+  );
   const patientQueueDisplay = queuePositions.map((position) => ({
     id: position.id,
     accountNo: position.accountNo,
     fullName: position.accountNo.trim().toUpperCase() === normalizedLoggedInAccount
       ? currentUser?.name || ''
       : '',
-    isEmergency: false,
+    isEmergency: position.accountNo.trim().toUpperCase() === normalizedLoggedInAccount &&
+      loggedInPatientQueueEntry?.isEmergency === true,
   }));
   const patientRoomAssignment = activeQueue.find(
     (patient) => patient.accountNo.trim().toUpperCase() === normalizedLoggedInAccount,
@@ -605,21 +605,55 @@ export default function App() {
   const dynamicPosition = currentUser?.role === 'patient'
     ? patientQueueIndex !== -1 ? `Position #${patientQueueIndex + 1}` : 'Not in Queue'
     : patientQueueIndex !== -1 ? `Position #${patientQueueIndex + 1}` : 'Not in Queue';
-  const dynamicWaitTime = currentUser?.role === 'patient'
-    ? patientQueueIndex !== -1 ? 'Ask clinic staff' : '—'
-    : patientQueueIndex !== -1 ? `${(patientQueueIndex + 1) * 5} mins` : '0 min';
+  const dynamicQueueStatus = patientQueueIndex === 0
+    ? 'Checking up'
+    : patientQueueIndex > 0
+      ? 'Pending'
+      : 'Waiting in Queue';
+  const dynamicQueueStatusClass = patientQueueIndex === 0
+    ? 'text-emerald-600'
+    : patientQueueIndex > 0
+      ? 'text-amber-600'
+      : 'text-slate-600';
+  const savedPatientWaitMinutes = queuePositions[patientQueueIndex]?.waitEstimateVersion ===
+    QUEUE_WAIT_ESTIMATE_VERSION
+    ? queuePositions[patientQueueIndex]?.estimatedWaitMinutes
+    : undefined;
+  const fallbackPatientWaitMinutes = patientQueueIndex > 0
+    ? queuePositions
+      .slice(0, patientQueueIndex)
+      .reduce(
+        (total, position) =>
+          total + (position.priorityWeight >= EMERGENCY_PRIORITY_WEIGHT
+            ? EMERGENCY_WAIT_MINUTES
+            : STANDARD_WAIT_MINUTES),
+        0,
+      )
+    : 0;
+  const dynamicWaitMinutes = patientQueueIndex === -1
+    ? null
+    : currentUser?.role === 'patient'
+      ? savedPatientWaitMinutes ?? fallbackPatientWaitMinutes
+      : activeQueue
+        .slice(0, patientQueueIndex)
+        .reduce(
+          (total, patient) =>
+            total + (patient.isEmergency ? EMERGENCY_WAIT_MINUTES : STANDARD_WAIT_MINUTES),
+          0,
+        );
+  const dynamicWaitTime = dynamicWaitMinutes === null
+    ? currentUser?.role === 'patient' ? '—' : '0 min'
+    : formatEstimatedWait(dynamicWaitMinutes);
   const emergencyPatientsAhead = currentUser?.role === 'patient' || patientQueueIndex === -1
     ? 0
     : activeQueue
       .slice(0, patientQueueIndex)
       .filter((patient) => patient.isEmergency).length;
-  const dynamicQueueSpeed = currentUser?.role === 'patient'
-    ? '—'
-    : patientQueueIndex === -1
+  const dynamicQueueSpeed = dynamicWaitMinutes === null
     ? 'N/A'
-    : emergencyPatientsAhead >= 2
-      ? 'Slow'
-      : emergencyPatientsAhead === 1
+    : dynamicWaitMinutes > MODERATE_QUEUE_MAX_WAIT_MINUTES
+      ? 'Super Slow'
+      : dynamicWaitMinutes > FAST_QUEUE_MAX_WAIT_MINUTES
         ? 'Moderate'
         : 'Fast';
 
@@ -671,7 +705,7 @@ export default function App() {
 
               const isDoctor = await checkIfDoctor(userEmail);
               if (isDoctor) {
-                alert("Access Denied: Doctor accounts cannot access the Admin Portal.");
+                showAppNotice('error', 'Access denied: Doctor accounts cannot access the Admin Portal.');
                 await signOut(auth);
                 return;
               }
@@ -681,11 +715,14 @@ export default function App() {
                 setStaffAuthenticated(true); 
                 setCurrentUser({ role: 'admin', name: adminData.fullName || 'System Administrator', email: userEmail, uid: userCredential.user.uid }); 
               } else {
-                alert(`Access Denied: Add an admin profile with role "admin" at /admins/${userCredential.user.uid} to match the current Firestore security rules.`);
+                showAppNotice(
+                  'error',
+                  `Access denied: Add an admin profile with role "admin" at /admins/${userCredential.user.uid} to match the current Firestore security rules.`,
+                );
                 await signOut(auth);
               }
             } catch (err: unknown) {
-              alert("Invalid Admin Credentials: " + getErrorMessage(err));
+              showAppNotice('error', `Admin login failed: ${getErrorMessage(err)}`);
             }
           }} className="space-y-4">
             <input type="email" required placeholder="Admin Email Address" value={adminInput} onChange={(e) => setAdminInput(e.target.value)} className="w-full rounded-2xl border border-white/20 bg-white/10 p-3.5 text-sm text-white placeholder-slate-300 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/70" />
@@ -717,7 +754,7 @@ export default function App() {
               const roomSnapshot = await getDoc(doc(db, 'rooms', credentials.user.uid));
               const roomData = roomSnapshot.data();
               if (!roomSnapshot.exists() || roomData?.role !== 'room') {
-                alert('Access denied: this account is not registered as Room staff.');
+                showAppNotice('error', 'Access denied: this account is not registered as Room staff.');
                 await signOut(auth);
                 return;
               }
@@ -748,7 +785,10 @@ export default function App() {
                 return;
               }
 
-              alert(`Room login failed: ${error instanceof Error ? error.message : String(error)}`);
+              showAppNotice(
+                'error',
+                `Room login failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
             }
           }} className="space-y-4">
             <input
@@ -810,11 +850,11 @@ export default function App() {
                   uid: userCredential.user.uid,
                 });
               } else {
-                alert('Access Denied: This account is not registered as a doctor.');
+                showAppNotice('error', 'Access denied: This account is not registered as a doctor.');
                 await signOut(auth);
               }
             } catch (err: unknown) {
-              alert('Invalid Doctor Credentials: ' + getErrorMessage(err));
+              showAppNotice('error', `Doctor login failed: ${getErrorMessage(err)}`);
             }
           }} className="space-y-4">
             <input type="email" required placeholder="Doctor Email Address" value={doctorInput} onChange={(e) => setDoctorInput(e.target.value)} className="w-full rounded-2xl border border-white/20 bg-white/10 p-3.5 text-sm text-white placeholder-slate-300 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/70" />
@@ -843,7 +883,7 @@ export default function App() {
             const isAdmin = await checkIfAdmin(userEmail);
 
             if (isDoctor || isAdmin) {
-              alert(`Access Denied: Staff accounts cannot log in through the Patient Portal.`);
+              showAppNotice('error', 'Access denied: Staff accounts cannot log in through the Patient Portal.');
               await signOut(auth);
               setIsLoggingIn(false);
               return;
@@ -868,7 +908,7 @@ export default function App() {
               accountNo: patientRecord.accountNo,
             });
           } catch (err: unknown) {
-            alert("Patient Login Error: " + getErrorMessage(err));
+            showAppNotice('error', `Patient login failed: ${getErrorMessage(err)}`);
           } finally {
             setIsLoggingIn(false);
           }
@@ -887,7 +927,7 @@ export default function App() {
           const isAdmin = await checkIfAdmin(userEmail);
 
           if (isDoctor || isAdmin) {
-            alert("Access Denied: Staff accounts cannot access the Patient Portal via Google login.");
+            showAppNotice('error', 'Access denied: Staff accounts cannot access the Patient Portal via Google login.');
             await signOut(auth);
             return;
           }
@@ -900,7 +940,7 @@ export default function App() {
           });
 
           if (!patientRecord) {
-            alert('Unable to initialize patient profile for this Google account.');
+            showAppNotice('error', 'Unable to initialize patient profile for this Google account.');
             return;
           }
 
@@ -919,10 +959,11 @@ export default function App() {
   // 4. Admin Dashboard
   if (currentUser.role === 'admin') {
     return (
+      <>
       <AdminLayout activeTab={adminTab} setActiveTab={setAdminTab} adminName={currentUser.name} onLogout={() => { setStaffAuthenticated(false); setCurrentUser(null); window.history.pushState({}, '', '/'); }}>
         {adminTab === 'queue' && (
           <div className="space-y-6">
-            <AdminDashboard queue={activeQueue} />
+            <AdminDashboard queue={activeQueue} cancelledCount={cancelledCount} />
             
             {/* Live Queue Table with Cancel/Remove Option for Admin */}
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
@@ -972,12 +1013,19 @@ export default function App() {
                         {/* ADMIN CANCEL QUEUE BUTTON */}
                         <button
                           onClick={async () => {
-                            if (confirm(`Are you sure you want to remove ${p.fullName} from the queue?`)) {
+                            const accepted = await confirmInUi({
+                              title: 'Remove patient from queue?',
+                              message: `Are you sure you want to remove ${p.fullName} from the queue?`,
+                              confirmLabel: 'Remove patient',
+                              destructive: true,
+                            });
+                            if (accepted) {
                               try {
                                 await removeFromQueue(p.accountNo);
-                                alert(`${p.fullName} removed from the queue!`);
+                                setCancelledCount((count) => count + 1);
+                                showAppNotice('success', `${p.fullName} removed from the queue.`);
                               } catch (err: unknown) {
-                                alert("Error removing from queue: " + getErrorMessage(err));
+                                showAppNotice('error', `Error removing from queue: ${getErrorMessage(err)}`);
                               }
                             }
                           }}
@@ -1020,7 +1068,10 @@ export default function App() {
                 const levelText = selectedEmergencyRoute.level
                   ? `Trauma Level ${selectedEmergencyRoute.level}`
                   : 'priority level not configured';
-                alert(`Emergency patient ${emergencyName.trim()} added with ${levelText} and assigned to ${getEmergencyDestination(selectedEmergencyRoute.room)}.`);
+                showAppNotice(
+                  'success',
+                  `Emergency patient ${emergencyName.trim()} added with ${levelText} and assigned to ${getEmergencyDestination(selectedEmergencyRoute.room)}.`,
+                );
                 setEmergencyName('');
                 setEmergencyAccountNo('');
                 setEmergencyTraumaType('');
@@ -1029,7 +1080,7 @@ export default function App() {
                 setEmergencySpecification('');
               } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                alert(`Error adding emergency patient: ${message}`);
+                showAppNotice('error', `Error adding emergency patient: ${message}`);
               }
             }} className="space-y-4">
               <div>
@@ -1264,7 +1315,7 @@ export default function App() {
                           onClick={async () => {
                             const assignedDocName = selectedDoctors[appt.id!];
                             if (!assignedDocName) {
-                              alert("Please select a doctor to assign to this appointment.");
+                              showAppNotice('info', 'Please select a doctor to assign to this appointment.');
                               return;
                             }
 
@@ -1282,13 +1333,19 @@ export default function App() {
                               assignedRoom = "Dental Clinic (Room 102)";
                             }
 
-                            await updateAppointmentStatus(appt.id!, 'confirmed', {
-                              doctorId: assignedDocName,
-                              doctorName: assignedDocName,
-                              room: assignedRoom
-                            });
-                            
-                            alert(`Appointment approved! Assigned to ${assignedDocName} at ${assignedRoom}.`);
+                            try {
+                              await updateAppointmentStatus(appt.id!, 'confirmed', {
+                                doctorId: assignedDocName,
+                                doctorName: assignedDocName,
+                                room: assignedRoom
+                              });
+                              showAppNotice(
+                                'success',
+                                `Appointment approved! Assigned to ${assignedDocName} at ${assignedRoom}.`,
+                              );
+                            } catch (error) {
+                              showAppNotice('error', `Error approving appointment: ${getErrorMessage(error)}`);
+                            }
                           }}
                           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition shadow-sm"
                         >
@@ -1299,14 +1356,21 @@ export default function App() {
 
                     <button 
                       onClick={async () => {
-                        if (confirm(`Are you sure you want to delete/cancel the appointment for ${appt.patientName}?`)) {
+                        const accepted = await confirmInUi({
+                          title: 'Cancel appointment?',
+                          message: `Are you sure you want to cancel the appointment for ${appt.patientName}?`,
+                          confirmLabel: 'Cancel appointment',
+                          destructive: true,
+                        });
+                        if (accepted) {
                           try {
                             if (appt.id) {
                               await updateAppointmentStatus(appt.id, 'cancelled');
-                              alert("Appointment cancelled successfully!");
+                              setCancelledCount((count) => count + 1);
+                              showAppNotice('success', 'Appointment cancelled successfully.');
                             }
                           } catch (err: unknown) {
-                            alert("Error deleting appointment: " + getErrorMessage(err));
+                            showAppNotice('error', `Error deleting appointment: ${getErrorMessage(err)}`);
                           }
                         }
                       }}
@@ -1333,7 +1397,7 @@ export default function App() {
               e.preventDefault();
               try {
                 await createDoctorAccount(docEmail, docPassword, docName, docSpecialty);
-                alert(`Doctor account for ${docName} created successfully!`);
+                showAppNotice('success', `Doctor account for ${docName} created successfully.`);
                 setDocName('');
                 setDocEmail('');
                 setDocSpecialty('');
@@ -1341,7 +1405,7 @@ export default function App() {
                 setDocPassword('');
                 setShowDoctorPassword(false);
               } catch (error: unknown) {
-                alert('Error creating doctor account: ' + getErrorMessage(error));
+                showAppNotice('error', `Error creating doctor account: ${getErrorMessage(error)}`);
               }
             }} className="space-y-4">
               <div>
@@ -1452,13 +1516,19 @@ export default function App() {
               event.preventDefault();
               try {
                 await createRoomAccount(roomEmail, roomPassword, roomName);
-                alert(`Room staff account for ${roomName} created successfully. Sign in at /room.`);
+                showAppNotice(
+                  'success',
+                  `Room staff account for ${roomName} created successfully. Sign in at /room.`,
+                );
                 setRoomName('');
                 setRoomEmail('');
                 setRoomPassword('');
                 setShowRoomPassword(false);
               } catch (error) {
-                alert(`Error creating Room staff account: ${error instanceof Error ? error.message : String(error)}`);
+                showAppNotice(
+                  'error',
+                  `Error creating Room staff account: ${error instanceof Error ? error.message : String(error)}`,
+                );
               }
             }} className="space-y-4">
               <div>
@@ -1532,6 +1602,9 @@ export default function App() {
         )}
 
         {adminTab === 'progress' && <ProgressUpdate />}
+        {adminTab === 'emergencyProfiles' && (
+          <AdminEmergencyPatientProfiles onNotify={showAppNotice} />
+        )}
         {adminTab === 'emergencyProcedures' && currentUser.uid && (
           <EmergencyProtocolManager routes={emergencyRoutes} adminUid={currentUser.uid} />
         )}
@@ -1542,6 +1615,7 @@ export default function App() {
           </div>
         )}
       </AdminLayout>
+      </>
     );
   }
 
@@ -1632,12 +1706,17 @@ export default function App() {
                     {/* DOCTOR "FINISH / DONE" BUTTON */}
                     <button
                       onClick={async () => {
-                        if (confirm(`Mark consultation as finished for ${p.fullName}?`)) {
+                        const accepted = await confirmInUi({
+                          title: 'Finish consultation?',
+                          message: `Mark consultation as finished for ${p.fullName}?`,
+                          confirmLabel: 'Finish consultation',
+                        });
+                        if (accepted) {
                           try {
                             await removeFromQueue(p.accountNo);
-                            alert(`Consultation completed for ${p.fullName}.`);
+                            showAppNotice('success', `Consultation completed for ${p.fullName}.`);
                           } catch (err: unknown) {
-                            alert("Error finishing consultation: " + getErrorMessage(err));
+                            showAppNotice('error', `Error finishing consultation: ${getErrorMessage(err)}`);
                           }
                         }
                       }}
@@ -1894,18 +1973,22 @@ export default function App() {
                 </div>
                 <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 sm:rounded-2xl sm:p-4">
                   <p className="text-[10px] font-bold uppercase leading-tight text-slate-500 sm:text-xs">Queue Status</p>
-                  <p className="mt-1 break-words text-lg font-extrabold text-emerald-600 sm:text-xl">Pending</p>
+                  <p className={`mt-1 break-words text-lg font-extrabold sm:text-xl ${dynamicQueueStatusClass}`}>
+                    {dynamicQueueStatus}
+                  </p>
                 </div>
                 <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 sm:rounded-2xl sm:p-4">
                   <p className="text-[10px] font-bold uppercase leading-tight text-slate-500 sm:text-xs">Queue Speed</p>
                   <p className="mt-1 flex items-center text-lg font-extrabold text-slate-800 sm:text-xl">
                     {dynamicQueueSpeed}
-                    <Zap className={`w-4 h-4 ml-2 ${
-                      dynamicQueueSpeed === 'Slow'
+                    <Zap className={`ml-2 h-4 w-4 ${
+                      dynamicQueueSpeed === 'Super Slow'
                         ? 'text-red-500 fill-red-500'
                         : dynamicQueueSpeed === 'Moderate'
                           ? 'text-amber-500 fill-amber-500'
-                          : 'text-emerald-500 fill-emerald-500'
+                          : dynamicQueueSpeed === 'Fast'
+                            ? 'text-emerald-500 fill-emerald-500'
+                            : 'text-slate-400'
                     }`} />
                   </p>
                   {patientQueueIndex !== -1 && emergencyPatientsAhead > 0 && (
@@ -2007,7 +2090,7 @@ export default function App() {
             name: patientProfile?.fullName || currentUser.name,
             accountNo: loggedInAccount,
             uid: currentUser.uid || '',
-          }} />
+          }} onNotify={showAppNotice} />
         )}
       {/* end of appointment tab */}
         {patientTab === 'progress' && (
@@ -2193,10 +2276,16 @@ export default function App() {
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 if (!patientDocId) {
-                  alert('Your patient profile could not be found. Please sign out and sign in again, then contact clinic administration if the issue continues.');
+                  showAppNotice(
+                    'error',
+                    'Your patient profile could not be found. Please sign out and sign in again, then contact clinic administration if the issue continues.',
+                  );
                   return;
                 }
-                if (!confirm("Are you sure? Personal profile details can only be submitted once!")) return;
+                if (!isConfirmingPatientProfileSave) {
+                  setIsConfirmingPatientProfileSave(true);
+                  return;
+                }
 
                 setIsSavingPatientProfile(true);
                 try {
@@ -2206,13 +2295,14 @@ export default function App() {
                     ...profileFormData,
                     profileCompleted: true
                   }));
-                  alert("Profile details saved successfully!");
+                  setIsConfirmingPatientProfileSave(false);
+                  showAppNotice('success', 'Profile details saved successfully.');
                 } catch (err) {
                   const error = err as { code?: string; message?: string };
                   const message = error.code === 'permission-denied'
                     ? 'Firestore denied this profile update. Publish the updated patient rules from firebaseRuling.txt in Firebase Console > Firestore Database > Rules.'
                     : error.message || String(err);
-                  alert(`Error saving profile: ${message}`);
+                  showAppNotice('error', `Error saving profile: ${message}`);
                 } finally {
                   setIsSavingPatientProfile(false);
                 }
@@ -2222,7 +2312,10 @@ export default function App() {
                     <label className="block text-xs font-bold text-slate-600 mb-1">Sex</label>
                     <select 
                       value={profileFormData.sex} 
-                      onChange={(e) => setProfileFormData({ ...profileFormData, sex: e.target.value })} 
+                      onChange={(e) => {
+                        setProfileFormData({ ...profileFormData, sex: e.target.value });
+                        setIsConfirmingPatientProfileSave(false);
+                      }}
                       className="w-full p-2.5 bg-slate-50 border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#1b7a57]"
                     >
                       <option value="Male">Male</option>
@@ -2260,6 +2353,7 @@ export default function App() {
                         birthday,
                         age: calculateAgeFromBirthday(birthday),
                       }));
+                      setIsConfirmingPatientProfileSave(false);
                     }} 
                     className="w-full p-2.5 bg-slate-50 border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#1b7a57]" 
                   />
@@ -2272,7 +2366,10 @@ export default function App() {
                     type="text" 
                     required 
                     value={profileFormData.contact} 
-                    onChange={(e) => setProfileFormData({ ...profileFormData, contact: e.target.value })} 
+                    onChange={(e) => {
+                      setProfileFormData({ ...profileFormData, contact: e.target.value });
+                      setIsConfirmingPatientProfileSave(false);
+                    }}
                     placeholder="+63 900 000 0000" 
                     className="w-full p-2.5 bg-slate-50 border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#1b7a57]" 
                   />
@@ -2284,7 +2381,10 @@ export default function App() {
                     type="text" 
                     required 
                     value={profileFormData.address} 
-                    onChange={(e) => setProfileFormData({ ...profileFormData, address: e.target.value })} 
+                    onChange={(e) => {
+                      setProfileFormData({ ...profileFormData, address: e.target.value });
+                      setIsConfirmingPatientProfileSave(false);
+                    }}
                     placeholder="House #, Street, City" 
                     className="w-full p-2.5 bg-slate-50 border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#1b7a57]" 
                   />
@@ -2295,8 +2395,34 @@ export default function App() {
                   disabled={isSavingPatientProfile}
                   className="w-full py-3 bg-[#1b7a57] hover:bg-emerald-700 text-white font-bold rounded-2xl shadow transition"
                 >
-                  {isSavingPatientProfile ? 'Saving Profile...' : 'Save Profile (Single Attempt)'}
+                  {isSavingPatientProfile
+                    ? 'Saving Profile...'
+                    : isConfirmingPatientProfileSave
+                      ? 'Confirm and Save Profile'
+                      : 'Review Profile Before Saving'}
                 </button>
+                {isConfirmingPatientProfileSave && (
+                  <div
+                    role="group"
+                    aria-labelledby="confirm-patient-profile-save"
+                    className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3"
+                  >
+                    <h4 id="confirm-patient-profile-save" className="font-bold text-amber-900">
+                      Confirm profile details
+                    </h4>
+                    <p className="text-sm text-amber-800">
+                      Personal profile details can only be submitted once. Review your information, then confirm to save.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={isSavingPatientProfile}
+                      onClick={() => setIsConfirmingPatientProfileSave(false)}
+                      className="rounded-lg border border-amber-300 px-3 py-1.5 text-sm font-bold text-amber-900 hover:bg-white disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </form>
             )}
             </section>

@@ -121,9 +121,27 @@ export async function updateAppointmentStatus(
     }
 
     const appointment = appointmentSnapshot.data();
-    const queuePositionRef = typeof appointment.accountNo === 'string'
-      ? doc(db, 'queuePositions', appointment.accountNo)
-      : null;
+    const accountNo = typeof appointment.accountNo === 'string'
+      ? appointment.accountNo.trim()
+      : '';
+    const queueRef = accountNo ? doc(db, 'queues', accountNo) : null;
+    const queuePositionRef = accountNo ? doc(db, 'queuePositions', accountNo) : null;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const appointmentStatus = typeof appointment.status === 'string'
+      ? appointment.status.toLowerCase()
+      : '';
+    const serviceType = typeof appointment.serviceType === 'string'
+      ? appointment.serviceType.toLowerCase()
+      : '';
+    const isInActiveQueue =
+      appointmentStatus === 'confirmed' ||
+      appointmentStatus === 'approved' ||
+      (serviceType.includes('emergency') && appointmentStatus !== 'cancelled');
+    const shouldRemoveQueueEntry =
+      status === 'cancelled' &&
+      appointment.date === today &&
+      isInActiveQueue;
     const updateData: Record<string, string> = { status };
     if (assignedData?.doctorId) updateData.doctorId = assignedData.doctorId;
     if (assignedData?.doctorName) updateData.doctorName = assignedData.doctorName;
@@ -138,17 +156,26 @@ export async function updateAppointmentStatus(
         getAppointmentSlotId(appointment.date, appointment.timeSlot),
       )
       : null;
-    const slotSnapshot = slotRef ? await transaction.get(slotRef) : null;
+    const [slotSnapshot, queueSnapshot, queuePositionSnapshot] = await Promise.all([
+      slotRef ? transaction.get(slotRef) : Promise.resolve(null),
+      shouldRemoveQueueEntry && queueRef ? transaction.get(queueRef) : Promise.resolve(null),
+      shouldRemoveQueueEntry && queuePositionRef
+        ? transaction.get(queuePositionRef)
+        : Promise.resolve(null),
+    ]);
 
     transaction.update(apptRef, updateData);
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (shouldRemoveQueueEntry) {
+      if (queueRef && queueSnapshot?.exists()) transaction.delete(queueRef);
+      if (queuePositionRef && queuePositionSnapshot?.exists()) transaction.delete(queuePositionRef);
+    }
     if (status === 'confirmed' && queuePositionRef && appointment.date === today) {
       transaction.set(queuePositionRef, {
-        accountNo: appointment.accountNo,
+        accountNo,
         priorityWeight: typeof appointment.priorityWeight === 'number'
           ? appointment.priorityWeight
           : 0,
+        appointmentId,
       });
     }
     if (slotRef && slotSnapshot?.exists() && slotSnapshot.data().appointmentId === appointmentId) {

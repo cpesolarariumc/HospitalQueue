@@ -14,6 +14,7 @@ import {
   assignDiagnosticTests,
   diagnosticTestCatalog,
 } from '../services/diagnosticProgressService';
+import { useUiFeedback } from './uiFeedbackContext';
 
 function getAssignmentErrorMessage(error: unknown) {
   const code = typeof error === 'object' && error !== null && 'code' in error
@@ -32,6 +33,7 @@ interface DoctorProgressUpdateProps {
 }
 
 export default function DoctorProgressUpdate({ doctorName }: DoctorProgressUpdateProps) {
+  const { notify } = useUiFeedback();
   const [step, setStep] = useState<'selectPatient' | 'diagnosis' | 'prescription'>('selectPatient');
   const [comment, setComment] = useState('');
   const [prescriptionText, setPrescriptionText] = useState('');
@@ -138,7 +140,7 @@ export default function DoctorProgressUpdate({ doctorName }: DoctorProgressUpdat
       );
       await createPrescription(patient.accountNo, doctorName, prescriptionText);
       await removeFromQueue(patient.accountNo);
-      alert('Consultation progress and prescription saved to the patient records.');
+      notify('success', 'Consultation progress and prescription saved to the patient records.');
       setStep('selectPatient');
       setSearch('');
       setComment('');
