@@ -35,3 +35,5 @@ serviceAccount*.json
 *.sln
 *.sw?
 *.env
+firestore_rules.txt
+fixed-update-log.txt
