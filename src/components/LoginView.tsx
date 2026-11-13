@@ -12,15 +12,17 @@ import {
 } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 
+const inputClasses = 'w-full rounded-2xl border border-slate-700 bg-slate-800/80 pr-4 pl-10 text-sm text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-[#1b7a57]';
+const inputIconClasses = 'absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400';
+
 interface LoginViewProps {
   isLoggingIn: boolean;
   onLogin: (e: React.FormEvent, credentials?: { email: string; pass: string }) => void;
   onRegister: (newUserData: { uid: string; fullName: string; email: string; phone: string }) => Promise<void>;
   onGoogleSuccess: (user: FirebaseUser) => void;
-  onSwitchToOtp?: (mode?: 'signup' | 'forgot' | 'login') => void;
 }
 
-export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: LoginViewProps) {
+export default function LoginView({ isLoggingIn, onLogin, onRegister, onGoogleSuccess }: LoginViewProps) {
   // Modes: 'login' | 'signup' | 'forgot'
   const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>('login');
 
@@ -36,6 +38,7 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
 
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [loading, setLoading] = useState(false);
+  const isProcessing = loading || isLoggingIn;
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,8 +107,8 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
   };
 
   return (
-    <div className="flex min-h-dvh flex-col bg-slate-900 bg-cover bg-center" style={{ backgroundImage: `url('https://i.pinimg.com/1200x/af/b6/05/afb605d20bae30bb5f1886ee8464078e.jpg')` }}>
-      <main className={`flex min-h-0 flex-1 items-start justify-center overflow-y-auto overscroll-y-none sm:items-center ${
+    <div className="flex h-screen h-dvh flex-col overflow-hidden bg-slate-900 bg-cover bg-center" style={{ backgroundImage: `url('https://i.pinimg.com/1200x/af/b6/05/afb605d20bae30bb5f1886ee8464078e.jpg')` }}>
+      <main className={`flex min-h-0 flex-1 items-start justify-center overflow-y-auto overscroll-contain sm:items-center ${
         mode === 'signup' ? 'p-2 sm:p-6' : 'p-3 sm:p-6'
       }`}>
         <div className={`my-auto w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900/85 text-center shadow-2xl backdrop-blur-md ${
@@ -147,7 +150,6 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
           </div>
         )}
 
-        <>
             {/* GOOGLE SIGN IN (Only shown on Login / Signup main view) */}
             {mode !== 'forgot' && (
               <>
@@ -181,7 +183,7 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                 <>
                   <div>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <span className={inputIconClasses}>
                         <User className="w-4 h-4" />
                       </span>
                       <input 
@@ -190,14 +192,14 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                         placeholder="Full Name" 
                         value={regFullName} 
                         onChange={(e) => setRegFullName(e.target.value)} 
-                        className="w-full pl-10 pr-4 py-2.5 sm:py-3.5 bg-slate-800/80 border border-slate-700 rounded-2xl text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-[#1b7a57] text-sm" 
+                        className={`${inputClasses} py-2.5 sm:py-3.5`}
                       />
                     </div>
                   </div>
 
                   <div>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <span className={inputIconClasses}>
                         <Mail className="w-4 h-4" />
                       </span>
                       <input
@@ -206,14 +208,14 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                         placeholder="Email Address"
                         value={regEmail}
                         onChange={(e) => setRegEmail(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 sm:py-3.5 bg-slate-800/80 border border-slate-700 rounded-2xl text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-[#1b7a57] text-sm"
+                        className={`${inputClasses} py-2.5 sm:py-3.5`}
                       />
                     </div>
                   </div>
 
                   <div>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <span className={inputIconClasses}>
                         <Lock className="w-4 h-4" />
                       </span>
                       <input 
@@ -222,7 +224,7 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                         placeholder="Password (minimum 6 characters)" 
                         value={regPassword} 
                         onChange={(e) => setRegPassword(e.target.value)} 
-                        className="w-full pl-10 pr-4 py-2.5 sm:py-3.5 bg-slate-800/80 border border-slate-700 rounded-2xl text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-[#1b7a57] text-sm" 
+                        className={`${inputClasses} py-2.5 sm:py-3.5`}
                       />
                     </div>
                   </div>
@@ -234,7 +236,7 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                 <>
                   <div>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <span className={inputIconClasses}>
                         <Mail className="w-4 h-4" />
                       </span>
                       <input 
@@ -243,14 +245,14 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                         placeholder="Email Address" 
                         value={loginEmail} 
                         onChange={(e) => setLoginEmail(e.target.value)} 
-                        className="w-full pl-10 pr-4 py-3.5 bg-slate-800/80 border border-slate-700 rounded-2xl text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-[#1b7a57] text-sm" 
+                        className={`${inputClasses} py-3.5`}
                       />
                     </div>
                   </div>
 
                   <div>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <span className={inputIconClasses}>
                         <Lock className="w-4 h-4" />
                       </span>
                       <input 
@@ -259,7 +261,7 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                         placeholder="Password" 
                         value={loginPassword} 
                         onChange={(e) => setLoginPassword(e.target.value)} 
-                        className="w-full pl-10 pr-4 py-3.5 bg-slate-800/80 border border-slate-700 rounded-2xl text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-[#1b7a57] text-sm" 
+                        className={`${inputClasses} py-3.5`}
                       />
                     </div>
 
@@ -301,12 +303,12 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
 
               <button 
                 type="submit" 
-                disabled={loading}
+                disabled={isProcessing}
                 className={`w-full bg-[#1b7a57] hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg transition duration-200 text-sm disabled:opacity-50 ${
                   mode === 'signup' ? 'py-2.5 sm:py-3.5' : 'py-3.5'
                 }`}
               >
-                {loading 
+                {isProcessing
                   ? 'Processing...' 
                   : mode === 'signup' 
                   ? 'Create Account'
@@ -342,7 +344,6 @@ export default function LoginView({ onLogin, onRegister, onGoogleSuccess }: Logi
                 </button>
               )}
             </div>
-          </>
 
       </div>
       </main>

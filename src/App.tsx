@@ -4,7 +4,6 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot, getDocs, getDoc, doc } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
 import LoginView from './components/LoginView';
-import { AuthScreen } from './components/AuthScreen';
 import PatientLayout from './components/PatientLayout';
 import DoctorLayout from './components/DoctorLayout';
 import DoctorProgressUpdate from './components/DoctorProgressUpdate';
@@ -217,7 +216,6 @@ export default function App() {
   const isExplicitRoomRoute = path.includes('room');
 
   const [currentUser, setCurrentUser] = useState<{ role: 'patient' | 'admin' | 'doctor' | 'room'; name: string; email?: string; accountNo?: string; uid?: string } | null>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'signup_otp' | 'forgot_otp' | 'otp'>('login');
   const [staffAuthenticated, setStaffAuthenticated] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [doctorSelectedDate, setDoctorSelectedDate] = useState(() => new Date());
@@ -652,18 +650,6 @@ export default function App() {
     return adminData?.role === 'admin' ? adminData : null;
   };
 
-  const handleSwitchToAuthMode = (targetMode?: 'signup' | 'forgot' | 'login') => {
-    if (targetMode === 'forgot') {
-      // Set your state to show the password reset screen/mode
-      setAuthMode('forgot_otp'); // (or whatever state variable you use for reset mode)
-    } else if (targetMode === 'signup') {
-      // Set your state to show the registration screen/mode
-      setAuthMode('signup_otp'); // (or whatever state variable you use for signup mode)
-    } else {
-      setAuthMode('login');
-    }
-  };
-  
   // 1. Admin Login Portal
   if (isExplicitAdminRoute && !staffAuthenticated) {
     return (
@@ -842,17 +828,6 @@ export default function App() {
 
   // 3. Patient Login View
   if (!currentUser) {
-    // If the user triggered OTP sign-up or password reset flow
-    if (authMode === 'otp') {
-      return (
-        <AuthScreen
-          onSuccess={() => {
-            setAuthMode('login');
-          }}
-        />
-      );
-    }
-
     // Default Login View with existing patient login & validation
     return (
       <LoginView
@@ -937,8 +912,6 @@ export default function App() {
             accountNo: patientRecord.accountNo,
           });
         }}
-        /* Pass the handler to switch to AuthScreen OTP view if needed */
-        onSwitchToOtp={handleSwitchToAuthMode}
       />
     );
   }
